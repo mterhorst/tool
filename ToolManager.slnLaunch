@@ -1,0 +1,11 @@
+[
+  {
+    "Name": "New Profile",
+    "Projects": [
+      {
+        "Path": "ToolManager\\ToolManager.csproj",
+        "Action": "Start"
+      }
+    ]
+  }
+]

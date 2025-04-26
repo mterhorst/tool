@@ -1,0 +1,66 @@
+name: Publish AOT Release
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: write  # Needed to create a GitHub Release
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    env:
+      DOTNET_EnablePreviewFeatures: true
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Restore dependencies
+        run: dotnet restore
+
+      # - name: Publish AOT - Linux
+      #   run: |
+      #     dotnet publish ToolManager.csproj \
+      #       -c Release \
+      #       -p:PublishAot=true \
+      #       -p:PublishSingleFile=true \
+      #       -p:SelfContained=true \
+      #       -r linux-x64 \
+      #       -o publish/linux-x64
+
+      - name: Publish AOT - Windows
+        run: |
+          dotnet publish ToolManager.csproj \
+            -c Release \
+            -p:PublishAot=true \
+            -p:PublishSingleFile=true \
+            -p:SelfContained=true \
+            -r win-x64 \
+            -o publish/win-x64
+
+      - name: Zip publish outputs
+        run: |
+          # cd publish/linux-x64
+          # zip -r ../../ToolManager-linux-x64.zip .
+          cd ../../publish/win-x64
+          zip -r ../../ToolManager-win-x64.zip .
+          cd ../../
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            ToolManager-linux-x64.zip
+            ToolManager-win-x64.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
