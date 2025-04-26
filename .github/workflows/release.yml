@@ -26,7 +26,7 @@ jobs:
 
       # - name: Publish AOT - Linux
       #   run: |
-      #     dotnet publish ToolManager.csproj \
+      #     dotnet publish \
       #       -c Release \
       #       -p:PublishAot=true \
       #       -p:PublishSingleFile=true \
@@ -36,7 +36,7 @@ jobs:
 
       - name: Publish AOT - Windows
         run: |
-          dotnet publish ToolManager.csproj \
+          dotnet publish \
             -c Release \
             -p:PublishAot=true \
             -p:PublishSingleFile=true \
