@@ -101,12 +101,3 @@ jobs:
             --push \
             -t $IMAGE_NAME \
             docker-build
-
-      - name: Make Docker image public
-        run: |
-          curl \
-          -X PATCH \
-          -H "Accept: application/vnd.github+json" \
-          -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
-          https://api.github.com/user/packages/container/toolmanager/visibility \
-          -d '{"visibility":"public"}'
