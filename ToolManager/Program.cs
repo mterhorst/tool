@@ -27,13 +27,15 @@ namespace ToolManager
                 isPrimary = !args.Any(x => x.Contains("--urls"));
                 if (isPrimary)
                 {
-                    using var process = Process.Start(new ProcessStartInfo
-                    {
-                        FileName = Environment.ProcessPath,
-                        Arguments = "--urls=http://localhost:5001/"
-                    });
+                    //using var process = Process.Start(new ProcessStartInfo
+                    //{
+                    //    FileName = Environment.ProcessPath,
+                    //    Arguments = "--urls=http://localhost:5001/"
+                    //});
                 }
             }
+
+            builder.WebHost.UseKestrelHttpsConfiguration();
 
             builder.Services.ConfigureHttpJsonOptions(options =>
             {
