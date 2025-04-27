@@ -35,7 +35,7 @@ namespace ToolManager
                 }
             }
 
-            builder.WebHost.UseKestrelHttpsConfiguration();
+            //builder.WebHost.UseKestrelHttpsConfiguration();
 
             builder.Services.ConfigureHttpJsonOptions(options =>
             {
