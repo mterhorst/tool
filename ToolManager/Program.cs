@@ -270,7 +270,7 @@ $"""
                 Log.LogFoundSelectedApp(_logger, app);
 
                 var request = context.HttpContext.Request;
-                var newUri = new UriBuilder(request.Scheme, request.Host.Host, app.Port, request.Path).Uri;
+                var newUri = new UriBuilder("http", app.Name, app.Port, request.Path).Uri;
 
                 Log.LogProxyUri(_logger, newUri);
 
