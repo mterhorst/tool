@@ -244,11 +244,13 @@ $"""
         private sealed class DynamicDestinationTransform : RequestTransform
         {
             private readonly FrozenSet<App> _apps;
+            private readonly ILogger<DynamicDestinationTransform> _logger;
 
             public DynamicDestinationTransform(IServiceProvider services)
             {
                 var config = services.GetRequiredService<IConfiguration>();
                 _apps = config.GetApps();
+                _logger = services.GetRequiredService<ILogger<DynamicDestinationTransform>>();
             }
 
             public override async ValueTask ApplyAsync(RequestTransformContext context)
@@ -258,13 +260,19 @@ $"""
                     return;
                 }
 
+                Log.LogSelectedApp(_logger, selectedApp);
+
                 if (_apps.FirstOrDefault(x => string.Equals(x.Name, selectedApp, StringComparison.Ordinal)) is not { } app)
                 {
                     return;
                 }
 
+                Log.LogFoundSelectedApp(_logger, app);
+
                 var request = context.HttpContext.Request;
                 var newUri = new UriBuilder(request.Scheme, request.Host.Host, app.Port, request.Path).Uri;
+
+                Log.LogProxyUri(_logger, newUri);
 
                 Rewrite(context, newUri);
 
