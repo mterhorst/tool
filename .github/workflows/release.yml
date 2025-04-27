@@ -119,10 +119,14 @@ jobs:
           unzip ToolManager-linux-x64.zip -d docker-build/
 
           # --- Generate the Dockerfile ---
-          # Use a base image with compatible GLIBC (Debian 12 Bookworm based)
-          # This image contains necessary runtime dependencies for native AOT apps but not the full runtime
+          # Use Fedora as the base image
           cat > docker-build/Dockerfile <<EOF
-          FROM mcr.microsoft.com/dotnet/runtime-deps:9.0-bookworm-slim-amd64
+          FROM fedora:latest
+          # Install common runtime dependencies for .NET Native AOT
+          # libicu provides globalization support, openssl-libs provides crypto
+          RUN dnf update -y && \
+              dnf install -y libicu openssl-libs && \
+              dnf clean all
           WORKDIR /app
           COPY . .
           # Ensure the binary is executable
