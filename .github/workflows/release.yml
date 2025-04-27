@@ -1,103 +1,147 @@
+# Workflow name
 name: Publish Native AOT + Docker Image
 
+# Trigger manually from the Actions tab
 on: [workflow_dispatch]
 
+# Permissions needed for creating releases and pushing packages (Docker images to GHCR)
 permissions:
-  contents: write
-  packages: write 
+  contents: write # Needed for creating releases
+  packages: write # Needed for pushing Docker images to GitHub Container Registry
 
 jobs:
+  # Job to build the Native AOT application for Linux
   build-linux:
     name: Build for Linux
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-latest # Use the latest Ubuntu runner provided by GitHub
 
     steps:
-      - uses: actions/checkout@v4
+      # Step 1: Check out the repository code
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-      - uses: actions/setup-dotnet@v4
+      # Step 2: Set up the .NET SDK (version 9.0.x)
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: '9.0.x'
+          dotnet-version: '9.0.x' # Specify the .NET version
 
-      - run: dotnet restore
+      # Step 3: Restore NuGet packages
+      - name: Restore dependencies
+        run: dotnet restore ToolManager/ToolManager.csproj # Restore packages for the specific project
 
-      - run: |
+      # Step 4: Publish the application as Native AOT
+      # Compiles the application ahead-of-time to native code
+      - name: Publish Native AOT
+        run: |
           dotnet publish ToolManager/ToolManager.csproj \
             -c Release \
             -p:PublishAot=true \
             -p:PublishSingleFile=true \
             -p:SelfContained=true \
             -r linux-x64 \
-            -o publish/linux-x64
+            -o publish/linux-x64 # Output directory
 
-      - run: |
+      # Step 5: Create a zip archive of the published output
+      - name: Create zip archive
+        run: |
           cd publish/linux-x64
-          zip -r ../../ToolManager-linux-x64.zip .
+          zip -r ../../ToolManager-linux-x64.zip . # Zip the contents of the output directory
           cd ../../
 
+      # Step 6: Upload the zip archive as a build artifact
       - name: Upload Linux artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ToolManager-linux-x64
-          path: ToolManager-linux-x64.zip
+          name: ToolManager-linux-x64 # Name of the artifact
+          path: ToolManager-linux-x64.zip # Path to the file to upload
 
+  # Job to create a GitHub Release
   release:
     name: Create GitHub Release
     runs-on: ubuntu-latest
-    needs: build-linux
+    needs: build-linux # This job depends on the successful completion of 'build-linux'
 
     steps:
+      # Step 1: Download the build artifact (the zip file)
       - name: Download Linux artifact
         uses: actions/download-artifact@v4
         with:
-          name: ToolManager-linux-x64
+          name: ToolManager-linux-x64 # Name of the artifact to download
 
+      # Step 2: Create the GitHub Release and upload the artifact
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v2 # Action to create releases
         with:
-          files: |
+          files: | # List of files to attach to the release
             ToolManager-linux-x64.zip
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # Use the default GitHub token for authentication
 
+  # Job to build and push the Docker image
   docker:
     name: Build and Push Docker Image
     runs-on: ubuntu-latest
-    needs: build-linux
+    needs: build-linux # This job depends on the successful completion of 'build-linux'
 
     steps:
-      - uses: actions/checkout@v4
+      # Step 1: Check out the repository code (needed if Dockerfile was in repo, but here we generate it)
+      - name: Checkout code
+        uses: actions/checkout@v4
 
+      # Step 2: Download the build artifact (the zip file containing the AOT binary)
       - name: Download Linux artifact
         uses: actions/download-artifact@v4
         with:
           name: ToolManager-linux-x64
 
+      # Step 3: Set up Docker Buildx (enhances Docker build capabilities)
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
+      # Step 4: Log in to GitHub Container Registry (GHCR)
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@v3
         with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          registry: ghcr.io # Target registry
+          username: ${{ github.actor }} # GitHub username running the action
+          password: ${{ secrets.GITHUB_TOKEN }} # Use the default GitHub token as password
 
+      # Step 5: Build and push the Docker image
       - name: Build and Push Docker Image
         run: |
+          # Define the image name using repository owner and a fixed tag 'latest'
           IMAGE_NAME=ghcr.io/${{ github.repository_owner }}/toolmanager:latest
-          
+
+          # Create a directory for the Docker build context
           mkdir docker-build
+          # Unzip the downloaded artifact into the build context directory
           unzip ToolManager-linux-x64.zip -d docker-build/
-          
+
+          # --- Generate the Dockerfile ---
+          # Use a base image with compatible GLIBC (Debian 12 Bookworm based)
+          # This image contains necessary runtime dependencies for native AOT apps but not the full runtime
           cat > docker-build/Dockerfile <<EOF
-          FROM debian:bullseye-slim
+          FROM mcr.microsoft.com/dotnet/runtime-deps:9.0-bookworm-slim-amd64
           WORKDIR /app
           COPY . .
-          CMD ["./ToolManager"]
+          # Ensure the binary is executable
+          RUN chmod +x ./ToolManager
+          # Set the entrypoint for the container
+          ENTRYPOINT ["./ToolManager"]
           EOF
+          # --- End of Dockerfile generation ---
 
+          # Print the generated Dockerfile for verification
+          echo "--- Generated Dockerfile ---"
+          cat docker-build/Dockerfile
+          echo "--------------------------"
+
+          # Build the Docker image using buildx
           docker buildx build \
             --platform linux/amd64 \
             --push \
             -t $IMAGE_NAME \
-            docker-build
+            docker-build # Specify the build context directory
+
+          echo "Docker image pushed: $IMAGE_NAME"
