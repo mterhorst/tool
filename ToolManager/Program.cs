@@ -2,7 +2,6 @@
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Mvc;
 using System.Collections.Frozen;
-using System.Diagnostics;
 using System.Security.Claims;
 using System.Text.Json.Serialization;
 using Yarp.ReverseProxy.Transforms;
@@ -16,6 +15,8 @@ namespace ToolManager
         public static void Main(string[] args)
         {
             var builder = WebApplication.CreateSlimBuilder(args);
+
+            builder.WebHost.UseWebRoot("38CC62EFBE4040A5939ACC58F039EE22");
 
             var isPrimary = false;
             if (builder.Environment.IsProduction() && Environment.GetEnvironmentVariable("ISPRIMARY") is not null)
