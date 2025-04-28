@@ -14,9 +14,11 @@ namespace ToolManager
     {
         public static void Main(string[] args)
         {
-            var builder = WebApplication.CreateSlimBuilder(args);
-
-            builder.WebHost.UseWebRoot("38CC62EFBE4040A5939ACC58F039EE22");
+            var builder = WebApplication.CreateSlimBuilder(new WebApplicationOptions
+            {
+                Args = args,
+                WebRootPath = ""
+            });
 
             var isPrimary = false;
             if (builder.Environment.IsProduction() && Environment.GetEnvironmentVariable("ISPRIMARY") is not null)
