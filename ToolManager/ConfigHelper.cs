@@ -1,4 +1,5 @@
 ﻿using System.Collections.Frozen;
+using System.Diagnostics.CodeAnalysis;
 
 namespace ToolManager
 {
@@ -13,6 +14,14 @@ namespace ToolManager
         {
             return configuration.GetSection("Apps").Get<IList<App>>()!.ToFrozenSet();
         }
+        public static int GetInstance(this IConfiguration configuration)
+        {
+            return configuration.GetSection("Instance").Get<int>();
+        }
 
+        public static FrozenSet<Instance> GetInstances(this IConfiguration configuration)
+        {
+            return configuration.GetSection("Instances").Get<IList<Instance>>()!.ToFrozenSet();
+        }
     }
 }

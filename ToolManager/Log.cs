@@ -10,5 +10,8 @@
 
         [LoggerMessage(2003, LogLevel.Information, "Proxy uri: {uri}.")]
         public static partial void LogProxyUri(ILogger logger, Uri uri);
+
+        [LoggerMessage(2004, LogLevel.Information, "Current instance {currId} | App instance {appId}")]
+        public static partial void LogInstance(ILogger logger, int currId, int appId);
     }
 }

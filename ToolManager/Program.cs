@@ -2,6 +2,7 @@
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Mvc;
 using System.Collections.Frozen;
+using System.Diagnostics.CodeAnalysis;
 using System.Security.Claims;
 using System.Text.Json.Serialization;
 using Yarp.ReverseProxy.Transforms;
@@ -65,9 +66,6 @@ namespace ToolManager
                 {
                     policy.RequireAuthenticatedUser();
                 });
-
-            //var users = builder.Configuration.GetSection("APP_USERS").Get<IList<Credential>>()!.ToFrozenSet();
-            //builder.Services.AddSingleton(users);
 
             builder.Services.AddSingleton<ITransformProvider, DynamicDestinationTransformProvider>();
 
@@ -215,17 +213,12 @@ $"""
     }
 
     public record Credential(string Username, string Password);
-    public record App(string Name, Instance Instance, int Port);
-
-
-    public enum Instance : byte
-    {
-        Primary = 0,
-        Secondary01
-    }
+    public record App(string Name, int Instance, int Port);
+    public record Instance(int Name, string Domain);
 
     [JsonSerializable(typeof(Credential))]
     [JsonSerializable(typeof(App))]
+    [JsonSerializable(typeof(Instance))]
     internal partial class AppJsonSerializerContext : JsonSerializerContext
     {
 
@@ -251,12 +244,16 @@ $"""
         private sealed class DynamicDestinationTransform : RequestTransform
         {
             private readonly FrozenSet<App> _apps;
+            private readonly int _instance;
+            private readonly FrozenSet<Instance> _instances;
             private readonly ILogger<DynamicDestinationTransform> _logger;
 
             public DynamicDestinationTransform(IServiceProvider services)
             {
                 var config = services.GetRequiredService<IConfiguration>();
                 _apps = config.GetApps();
+                _instance = config.GetInstance();
+                _instances = config.GetInstances();
                 _logger = services.GetRequiredService<ILogger<DynamicDestinationTransform>>();
             }
 
@@ -276,9 +273,17 @@ $"""
 
                 Log.LogFoundSelectedApp(_logger, app);
 
-                var request = context.HttpContext.Request;
-                //var newUri = new UriBuilder("http", app.Name, 8080, request.Path).Uri;
-                var newUri = new UriBuilder("http", app.Name, app.Port, request.Path).Uri;
+                Log.LogInstance(_logger, _instance, app.Instance);
+
+                Uri newUri;
+                if (app.Instance != app.Port && TryGetInstance(app.Instance, out var instance))
+                {
+                    newUri = new UriBuilder("https", instance.Domain, 443, context.HttpContext.Request.Path).Uri;
+                }
+                else
+                {
+                    newUri = new UriBuilder("http", app.Name, app.Port, context.HttpContext.Request.Path).Uri;
+                }
 
                 Log.LogProxyUri(_logger, newUri);
 
@@ -286,6 +291,14 @@ $"""
 
                 await ValueTask.CompletedTask;
             }
+
+
+            private bool TryGetInstance(int name, [NotNullWhen(true)] out Instance? instance)
+            {
+                instance = _instances.FirstOrDefault(x => x.Name == name);
+                return instance is not null;
+            }
+
         }
 
         private static void Rewrite(RequestTransformContext context, Uri uri)
