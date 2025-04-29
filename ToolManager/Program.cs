@@ -197,6 +197,10 @@ $"""
                 context.Response.Redirect("/apps");
             }).RequireAuthorization().DisableAntiforgery();
 
+            //app.MapGet("/", (HttpContext context, [FromServices] IConfiguration config, [FromForm] string appName) =>
+            //{
+            //}).RequireAuthorization().DisableAntiforgery();
+
             app.MapReverseProxy(proxyPipeline =>
             {
             });
