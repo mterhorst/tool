@@ -306,7 +306,7 @@ namespace ToolManager
                 Log.LogInstance(_logger, _instance.Name, app.Instance);
 
                 Uri newUri;
-                if (app.Instance != app.Instance && TryGetInstance(app.Instance, out var instance))
+                if (_instance.Name != app.Instance && TryGetInstance(app.Instance, out var instance))
                 {
                     newUri = new UriBuilder("https", instance.Domain, 443, context.HttpContext.Request.Path).Uri;
                 }
