@@ -14,9 +14,9 @@ namespace ToolManager
         {
             return configuration.GetSection("Apps").Get<IList<App>>()!.ToFrozenSet();
         }
-        public static int GetInstance(this IConfiguration configuration)
+        public static Instance GetInstance(this IConfiguration configuration)
         {
-            return configuration.GetSection("Instance").Get<int>();
+            return configuration.GetInstances().First(x => x.Name == configuration.GetSection("Instance").Get<int>());
         }
 
         public static FrozenSet<Instance> GetInstances(this IConfiguration configuration)

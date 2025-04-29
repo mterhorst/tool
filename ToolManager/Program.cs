@@ -1,5 +1,6 @@
 ﻿using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using System.Collections.Frozen;
 using System.Diagnostics.CodeAnalysis;
@@ -39,7 +40,7 @@ namespace ToolManager
                 }
             }
 
-            //builder.WebHost.UseKestrelHttpsConfiguration();
+            var instance = builder.Configuration.GetInstance();
 
             builder.Services.ConfigureHttpJsonOptions(options =>
             {
@@ -48,70 +49,98 @@ namespace ToolManager
 
             builder.Services.AddReverseProxy().LoadFromConfig(builder.Configuration.GetSection("ReverseProxy"));
 
-            builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
-                .AddCookie(options =>
-                {
-                    options.LoginPath = "/login";
-                    options.ExpireTimeSpan = TimeSpan.FromHours(1);
-
-                    options.Cookie.Name = "session";
-                    options.Cookie.Domain = builder.Environment.IsDevelopment() ? null : builder.Configuration["Authentication:CookieDomain"];
-                    options.Cookie.SameSite = SameSiteMode.Lax;
-                    options.Cookie.HttpOnly = true;
-                    options.Cookie.SecurePolicy = CookieSecurePolicy.Always;
-                });
-
             builder.Services.AddAuthorizationBuilder()
-                .AddPolicy("AuthenticatedOnly", policy =>
-                {
-                    policy.RequireAuthenticatedUser();
-                });
+            .AddPolicy("AuthenticatedOnly", policy =>
+            {
+                policy.RequireAuthenticatedUser();
+            });
+
+            Action<CookieAuthenticationOptions> configureCookieOptions = options =>
+            {
+                options.Cookie.Name = "session";
+                options.Cookie.Domain = builder.Environment.IsDevelopment() ? null : builder.Configuration["Authentication:CookieDomain"];
+                options.Cookie.SameSite = SameSiteMode.Lax;
+                options.Cookie.HttpOnly = true;
+                options.Cookie.SecurePolicy = CookieSecurePolicy.Always;
+                options.ExpireTimeSpan = TimeSpan.FromHours(1);
+            };
+
+
+            if (instance.Name == 0)
+            {
+                builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
+                    .AddCookie(options =>
+                    {
+                        configureCookieOptions(options);
+                        options.LoginPath = "/login";
+                    });
+            }
+            else
+            {
+                builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
+                   .AddCookie(options =>
+                   {
+                       configureCookieOptions(options);
+                       options.Events.OnRedirectToLogin = (context) =>
+                       {
+                           context.RedirectUri = $"https://{instance.Domain}";
+
+                           return Task.CompletedTask;
+                       };
+
+                   });
+            }
+
+            if (instance.Name == 0)
+            {
+                builder.Services
+                    .AddOpenIddict()
+                    .AddCore(options =>
+                    {
+                    })
+                    .AddServer(options =>
+                    {
+                        //options.AddDevelopmentEncryptionCertificate();
+                        //options.AddDevelopmentSigningCertificate();
+
+                        // Expose the standard endpoints
+                        options.SetAuthorizationEndpointUris("/connect/authorize")
+                               .SetTokenEndpointUris("/connect/token");
+
+                        // We’ll do Auth‑Code + PKCE
+                        options.AllowAuthorizationCodeFlow()
+                               .RequireProofKeyForCodeExchange();
+
+                        // Standard scopes
+                        options.RegisterScopes(Scopes.OpenId, Scopes.Profile, "api");
+
+                        // Ephemeral keys (rotate on restart)
+                        options.AddEphemeralEncryptionKey()
+                               .AddEphemeralSigningKey();
+
+                        // Tell OpenIddict to use ASP‑NET Core plumbing:
+                        options.UseAspNetCore()
+                               .EnableAuthorizationEndpointPassthrough()
+                               .EnableTokenEndpointPassthrough();
+                    })
+                    .AddValidation(options =>
+                    {
+                        // So our APIs can easily validate tokens
+                        //options.UseLocalServer();
+                        //options.UseAspNetCore();
+                    });
+            }
 
             builder.Services.AddSingleton<ITransformProvider, DynamicDestinationTransformProvider>();
 
-            builder.Services
-                .AddOpenIddict()
-                .AddCore(options =>
-                {
-                })
-                .AddServer(options =>
-                {
-                    //options.AddDevelopmentEncryptionCertificate();
-                    //options.AddDevelopmentSigningCertificate();
-
-                    // Expose the standard endpoints
-                    options.SetAuthorizationEndpointUris("/connect/authorize")
-                           .SetTokenEndpointUris("/connect/token");
-
-                    // We’ll do Auth‑Code + PKCE
-                    options.AllowAuthorizationCodeFlow()
-                           .RequireProofKeyForCodeExchange();
-
-                    // Standard scopes
-                    options.RegisterScopes(Scopes.OpenId, Scopes.Profile, "api");
-
-                    // Ephemeral keys (rotate on restart)
-                    options.AddEphemeralEncryptionKey()
-                           .AddEphemeralSigningKey();
-
-                    // Tell OpenIddict to use ASP‑NET Core plumbing:
-                    options.UseAspNetCore()
-                           .EnableAuthorizationEndpointPassthrough()
-                           .EnableTokenEndpointPassthrough();
-                })
-                .AddValidation(options =>
-                {
-                    // So our APIs can easily validate tokens
-                    //options.UseLocalServer();
-                    //options.UseAspNetCore();
-                });
-
             var app = builder.Build();
 
-            app.MapGet("/login", async (HttpContext context, [FromQuery] string? returnUrl) =>
+            if (instance.Name == 0)
             {
-                await context.Response.WriteAsync(
-$"""
+                app.MapGet("/login", async (HttpContext context, [FromQuery] string? returnUrl) =>
+                {
+                    await context.Response.WriteAsync(
+    $"""
 <html>
     <head>
         <meta name="color-scheme" content="only dark" />
@@ -125,41 +154,42 @@ $"""
     </body>
 </html>
 """);
-            });
+                });
 
-            app.MapPost("/login", async (
-                HttpContext context,
-                [FromServices] IConfiguration config,
-                [FromForm] string username,
-                [FromForm] string password,
-                [FromQuery] string? returnUrl) =>
-            {
-                var creds = config.GetCredentials();
-                // simple lookup in our env‑var list
-                if (!creds.Any(u => u.Username == username && u.Password == password))
+                app.MapPost("/login", async (
+                    HttpContext context,
+                    [FromServices] IConfiguration config,
+                    [FromForm] string username,
+                    [FromForm] string password,
+                    [FromQuery] string? returnUrl) =>
                 {
-                    context.Response.StatusCode = 401;
-                    await context.Response.WriteAsync("Invalid credentials");
-                    return;
-                }
+                    var creds = config.GetCredentials();
+                    // simple lookup in our env‑var list
+                    if (!creds.Any(u => u.Username == username && u.Password == password))
+                    {
+                        context.Response.StatusCode = 401;
+                        await context.Response.WriteAsync("Invalid credentials");
+                        return;
+                    }
 
-                // create a cookie‑based identity
-                var claims = new[]
-                {
+                    // create a cookie‑based identity
+                    var claims = new[]
+                    {
                     new Claim(Claims.Subject, username),
                     new Claim(Claims.Name, username)
-                };
-                var identity = new ClaimsIdentity(claims, CookieAuthenticationDefaults.AuthenticationScheme);
-                var principal = new ClaimsPrincipal(identity);
-                await context.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme, principal);
+                    };
+                    var identity = new ClaimsIdentity(claims, CookieAuthenticationDefaults.AuthenticationScheme);
+                    var principal = new ClaimsPrincipal(identity);
+                    await context.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme, principal);
 
-                if (string.IsNullOrWhiteSpace(returnUrl))
-                {
-                    returnUrl = "/apps";
-                }
+                    if (string.IsNullOrWhiteSpace(returnUrl))
+                    {
+                        returnUrl = "/apps";
+                    }
 
-                context.Response.Redirect(returnUrl);
-            }).DisableAntiforgery();
+                    context.Response.Redirect(returnUrl);
+                }).DisableAntiforgery();
+            }
 
             app.MapGet("/apps", async (HttpContext http, IConfiguration config) =>
             {
@@ -195,9 +225,9 @@ $"""
                 context.Response.Redirect("/apps");
             }).RequireAuthorization().DisableAntiforgery();
 
-            //app.MapGet("/", (HttpContext context, [FromServices] IConfiguration config, [FromForm] string appName) =>
-            //{
-            //}).RequireAuthorization().DisableAntiforgery();
+            app.MapGet("/bablablablablablablablab", (HttpContext context) =>
+            {
+            }).DisableAntiforgery();
 
             app.MapReverseProxy(proxyPipeline =>
             {
@@ -244,7 +274,7 @@ $"""
         private sealed class DynamicDestinationTransform : RequestTransform
         {
             private readonly FrozenSet<App> _apps;
-            private readonly int _instance;
+            private readonly Instance _instance;
             private readonly FrozenSet<Instance> _instances;
             private readonly ILogger<DynamicDestinationTransform> _logger;
 
@@ -273,7 +303,7 @@ $"""
 
                 Log.LogFoundSelectedApp(_logger, app);
 
-                Log.LogInstance(_logger, _instance, app.Instance);
+                Log.LogInstance(_logger, _instance.Name, app.Instance);
 
                 Uri newUri;
                 if (app.Instance != app.Port && TryGetInstance(app.Instance, out var instance))
