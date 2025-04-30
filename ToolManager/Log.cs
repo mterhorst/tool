@@ -13,5 +13,8 @@
 
         [LoggerMessage(2004, LogLevel.Information, "Current instance {currId} | App instance {appId}")]
         public static partial void LogInstance(ILogger logger, int currId, int appId);
+
+        [LoggerMessage(2005, LogLevel.Information, "Redirected to the sign in url: {location}.")]
+        public static partial void LogOnRedirectToLogin(ILogger logger, string location);
     }
 }
