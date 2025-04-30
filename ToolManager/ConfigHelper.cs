@@ -24,4 +24,16 @@ namespace ToolManager
             return configuration.GetSection("Instances").Get<IList<Instance>>()!.ToFrozenSet();
         }
     }
+
+    public static class InstanceHelper
+    {
+        public static Instance GetInstance0(this FrozenSet<Instance> instances) => instances.First(x => x.Name == 0);
+
+        public static bool TryGetInstance(this FrozenSet<Instance> instances, int name, [NotNullWhen(true)] out Instance? instance)
+        {
+            instance = instances.FirstOrDefault(x => x.Name == name);
+            return instance is not null;
+        }
+
+    }
 }

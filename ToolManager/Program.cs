@@ -41,6 +41,7 @@ namespace ToolManager
             }
 
             var instance = builder.Configuration.GetInstance();
+            var instance0 = builder.Configuration.GetInstances().GetInstance0();
 
             builder.Services.ConfigureHttpJsonOptions(options =>
             {
@@ -83,11 +84,10 @@ namespace ToolManager
                        configureCookieOptions(options);
                        options.Events.OnRedirectToLogin = (context) =>
                        {
-                           context.RedirectUri = $"https://{instance.Domain}";
+                           context.Response.Redirect($"https://{instance0.Domain}");
 
                            return Task.CompletedTask;
                        };
-
                    });
             }
 
@@ -306,7 +306,7 @@ namespace ToolManager
                 Log.LogInstance(_logger, _instance.Name, app.Instance);
 
                 Uri newUri;
-                if (_instance.Name != app.Instance && TryGetInstance(app.Instance, out var instance))
+                if (_instance.Name != app.Instance && _instances.TryGetInstance(app.Instance, out var instance))
                 {
                     newUri = new UriBuilder("https", instance.Domain, 443, context.HttpContext.Request.Path).Uri;
                 }
@@ -321,14 +321,6 @@ namespace ToolManager
 
                 await ValueTask.CompletedTask;
             }
-
-
-            private bool TryGetInstance(int name, [NotNullWhen(true)] out Instance? instance)
-            {
-                instance = _instances.FirstOrDefault(x => x.Name == name);
-                return instance is not null;
-            }
-
         }
 
         private static void Rewrite(RequestTransformContext context, Uri uri)
