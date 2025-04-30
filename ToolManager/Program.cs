@@ -84,7 +84,7 @@ namespace ToolManager
                        configureCookieOptions(options);
                        options.Events.OnRedirectToLogin = (context) =>
                        {
-                           var location = $"https://{instance0.Domain}";
+                           var location = $"https://{instance0.Domain}/login";
 
                            Log.LogOnRedirectToLogin(context.HttpContext.RequestServices.GetRequiredService<ILogger<Program>>(), location);
                            
