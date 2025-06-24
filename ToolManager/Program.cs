@@ -59,7 +59,25 @@ namespace ToolManager
                 options.Scope.Add("openid");
                 options.Scope.Add("profile");
                 options.Scope.Add("https://graph.microsoft.com/.default");
-                options.CallbackPath = "/signin-oidc";
+
+                if (builder.Environment.IsProduction())
+                {
+                    options.Events = new OpenIdConnectEvents
+                    {
+                        OnRedirectToIdentityProvider = context =>
+                        {
+                            var request = context.Request;
+                            var host = request.Host.Value;
+                            var pathBase = request.PathBase.Value;
+                            var callbackPath = context.Options.CallbackPath.Value;
+                            var redirectUri = $"https://{host}{pathBase}{callbackPath}";
+
+                            context.ProtocolMessage.RedirectUri = redirectUri;
+
+                            return Task.CompletedTask;
+                        }
+                    };
+                }
             });
 
             var app = builder.Build();
