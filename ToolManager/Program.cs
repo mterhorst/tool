@@ -20,7 +20,10 @@ namespace ToolManager
                 WebRootPath = ""
             });
 
-            builder.WebHost.UseKestrelHttpsConfiguration();
+            if (builder.Environment.IsDevelopment())
+            {
+                builder.WebHost.UseKestrelHttpsConfiguration();
+            }
 
             builder.Services.AddAuthorizationBuilder()
             .AddPolicy("AuthenticatedOnly", policy =>
