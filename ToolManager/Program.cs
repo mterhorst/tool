@@ -261,6 +261,27 @@ namespace ToolManager
 
                 Log.LogProxyUri(_logger, newUri);
 
+                // Remove specific cookies from the proxied request
+                var excludedCookies = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "app", "s", "sC1", "sC2", "sC3" };
+                if (context.ProxyRequest.Headers.TryGetValues("Cookie", out var cookieHeaders))
+                {
+                    var filteredCookies = cookieHeaders
+                        .SelectMany(header => header.Split(';', StringSplitOptions.RemoveEmptyEntries))
+                        .Select(cookie => cookie.Trim())
+                        .Where(cookie =>
+                        {
+                            var cookieName = cookie.Split('=')[0].Trim();
+                            return !excludedCookies.Contains(cookieName);
+                        });
+
+                    var newCookieHeader = string.Join("; ", filteredCookies);
+                    context.ProxyRequest.Headers.Remove("Cookie");
+                    if (!string.IsNullOrEmpty(newCookieHeader))
+                    {
+                        context.ProxyRequest.Headers.Add("Cookie", newCookieHeader);
+                    }
+                }
+
                 Rewrite(context, newUri);
 
                 await ValueTask.CompletedTask;
