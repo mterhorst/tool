@@ -65,7 +65,7 @@ namespace ToolManager
                 var url = $"https://login.microsoftonline.com/{builder.Configuration["EntraID:TenantId"]}/v2.0/adminconsent" +
                           $"?client_id={clientId}" +
                           $"&scope={scopes}" +
-                          $"&redirect_uri=https://localhost:5000/admin-consent/callback" +
+                          $"&redirect_uri={builder.Configuration["EntraID:RedirectUri"]}" +
                           $"&state={state}";
 
                 return Results.Redirect(url);
