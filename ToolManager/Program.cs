@@ -1,6 +1,7 @@
 ﻿using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authentication.OpenIdConnect;
+using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.Mvc;
 using System.Collections.Concurrent;
 using System.Security.Cryptography;
@@ -24,6 +25,13 @@ namespace ToolManager
             {
                 builder.WebHost.UseKestrelHttpsConfiguration();
             }
+
+            builder.Services.Configure<ForwardedHeadersOptions>(options =>
+            {
+                options.ForwardedHeaders = ForwardedHeaders.XForwardedProto;
+                options.KnownNetworks.Clear();
+                options.KnownProxies.Clear();
+            });
 
             builder.Services.AddAuthorizationBuilder()
             .AddPolicy("AuthenticatedOnly", policy =>
@@ -137,6 +145,8 @@ namespace ToolManager
             app.UseRouting();
             app.UseAuthentication();
             app.UseAuthorization();
+            
+            app.UseForwardedHeaders();
 
             app.Run();
 
