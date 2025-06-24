@@ -1,11 +1,13 @@
 ﻿using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authentication.OpenIdConnect;
-using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.Mvc;
 using System.Collections.Concurrent;
+using System.Collections.Frozen;
 using System.Security.Cryptography;
 using System.Text.Json.Serialization;
+using Yarp.ReverseProxy.Transforms;
+using Yarp.ReverseProxy.Transforms.Builder;
 
 namespace ToolManager
 {
@@ -26,12 +28,12 @@ namespace ToolManager
                 builder.WebHost.UseKestrelHttpsConfiguration();
             }
 
-            builder.Services.Configure<ForwardedHeadersOptions>(options =>
+            builder.Services.ConfigureHttpJsonOptions(options =>
             {
-                options.ForwardedHeaders = ForwardedHeaders.XForwardedProto;
-                options.KnownNetworks.Clear();
-                options.KnownProxies.Clear();
+                options.SerializerOptions.TypeInfoResolverChain.Insert(0, AppJsonSerializerContext.Default);
             });
+
+            builder.Services.AddReverseProxy().LoadFromConfig(builder.Configuration.GetSection("ReverseProxy"));
 
             builder.Services.AddAuthorizationBuilder()
             .AddPolicy("AuthenticatedOnly", policy =>
@@ -79,6 +81,8 @@ namespace ToolManager
                     };
                 }
             });
+
+            builder.Services.AddSingleton<ITransformProvider, DynamicDestinationTransformProvider>();
 
             var app = builder.Build();
 
@@ -160,11 +164,24 @@ namespace ToolManager
                     """);
             }).RequireAuthorization();
 
+            app.MapPost("/apps", (HttpContext context, [FromServices] IConfiguration config, [FromForm] string appName) =>
+            {
+                context.Response.Cookies.Append("app", appName, new CookieOptions
+                {
+                    SameSite = SameSiteMode.Lax,
+                    HttpOnly = true
+                });
+
+                context.Response.Redirect("/apps");
+            }).RequireAuthorization().DisableAntiforgery();
+
+            app.MapReverseProxy(proxyPipeline =>
+            {
+            });
+
             app.UseRouting();
             app.UseAuthentication();
             app.UseAuthorization();
-            
-            app.UseForwardedHeaders();
 
             app.Run();
 
@@ -179,5 +196,80 @@ namespace ToolManager
     internal partial class AppJsonSerializerContext : JsonSerializerContext
     {
 
+    }
+
+    public class DynamicDestinationTransformProvider : ITransformProvider
+    {
+        public void Apply(TransformBuilderContext context)
+        {
+            context.RequestTransforms.Add(new DynamicDestinationTransform(context.Services));
+        }
+
+        public void ValidateCluster(TransformClusterValidationContext context)
+        {
+
+        }
+
+        public void ValidateRoute(TransformRouteValidationContext context)
+        {
+
+        }
+
+        private sealed class DynamicDestinationTransform : RequestTransform
+        {
+            private readonly FrozenSet<App> _apps;
+            private readonly Instance _instance;
+            private readonly FrozenSet<Instance> _instances;
+            private readonly ILogger<DynamicDestinationTransform> _logger;
+
+            public DynamicDestinationTransform(IServiceProvider services)
+            {
+                var config = services.GetRequiredService<IConfiguration>();
+                _apps = config.GetApps();
+                _instance = config.GetInstance();
+                _instances = config.GetInstances();
+                _logger = services.GetRequiredService<ILogger<DynamicDestinationTransform>>();
+            }
+
+            public override async ValueTask ApplyAsync(RequestTransformContext context)
+            {
+                if (!context.HttpContext.Request.Cookies.TryGetValue("app", out var selectedApp))
+                {
+                    return;
+                }
+
+                Log.LogSelectedApp(_logger, selectedApp);
+
+                if (_apps.FirstOrDefault(x => string.Equals(x.Name, selectedApp, StringComparison.Ordinal)) is not { } app)
+                {
+                    return;
+                }
+
+                Log.LogFoundSelectedApp(_logger, app);
+
+                Log.LogInstance(_logger, _instance.Name, app.Instance);
+
+                Uri newUri;
+                if (_instance.Name != app.Instance && _instances.TryGetInstance(app.Instance, out var instance))
+                {
+                    newUri = new UriBuilder("https", instance.Domain, 443, context.HttpContext.Request.Path).Uri;
+                }
+                else
+                {
+                    newUri = new UriBuilder("http", app.Name, app.Port, context.HttpContext.Request.Path).Uri;
+                }
+
+                Log.LogProxyUri(_logger, newUri);
+
+                Rewrite(context, newUri);
+
+                await ValueTask.CompletedTask;
+            }
+        }
+        private static void Rewrite(RequestTransformContext context, Uri uri)
+        {
+            context.ProxyRequest.RequestUri = uri;
+            context.ProxyRequest.Headers.Host = uri.Authority;
+        }
     }
 }
