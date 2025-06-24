@@ -1,0 +1,694 @@
+﻿using Microsoft.AspNetCore;
+using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Authentication.Cookies;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Http.Extensions;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.IdentityModel.Tokens;
+using OpenIddict.Abstractions;
+using OpenIddict.Server;
+using OpenIddict.Server.AspNetCore;
+using System.Collections.Frozen;
+using System.IdentityModel.Tokens.Jwt;
+using System.Security.Claims;
+using System.Security.Cryptography;
+using System.Security.Cryptography.X509Certificates;
+using System.Text;
+using System.Text.Json.Serialization;
+using Yarp.ReverseProxy.Transforms;
+using Yarp.ReverseProxy.Transforms.Builder;
+using static OpenIddict.Abstractions.OpenIddictConstants;
+using static OpenIddict.Server.OpenIddictServerEvents;
+
+namespace ToolManager
+{
+    public class Program
+    {
+        public static async Task Main(string[] args)
+        {
+            var builder = WebApplication.CreateSlimBuilder(new WebApplicationOptions
+            {
+                Args = args,
+                WebRootPath = ""
+            });
+
+            builder.WebHost.UseKestrelHttpsConfiguration();
+
+            var instance = builder.Configuration.GetInstance();
+            var instance0 = builder.Configuration.GetInstances().GetInstance0();
+
+            Console.WriteLine(instance);
+
+            //if (!args.Any(x => x.Contains("--urls")))
+            //{
+            //    using var process = Process.Start(new ProcessStartInfo
+            //    {
+            //        FileName = Environment.ProcessPath,
+            //        Arguments = "--urls \"https://*:5001\" --Instance=1"
+            //    });
+            //}
+
+
+            //while (instance.Name == 1 && !Debugger.IsAttached)
+            //{
+            //    Console.WriteLine(Environment.ProcessId);
+            //    await Task.Delay(1000);
+            //}
+
+
+            builder.Services.ConfigureHttpJsonOptions(options =>
+            {
+                options.SerializerOptions.TypeInfoResolverChain.Insert(0, AppJsonSerializerContext.Default);
+            });
+
+            //builder.Services.AddReverseProxy().LoadFromConfig(builder.Configuration.GetSection("ReverseProxy"));
+
+            //builder.Services.AddAuthorizationBuilder()
+            //.AddPolicy("AuthenticatedOnly", policy =>
+            //{
+            //    policy.RequireAuthenticatedUser();
+            //});
+
+
+
+            // Define a hardcoded password
+            var password = "YourHardcodedPassword";
+
+            // Generate a self-signed certificate (for demonstration purposes)
+            var certificate = GenerateSelfSignedCertificate(password);
+
+            // Create an X509SecurityKey using the certificate
+            var signingKey = new X509SecurityKey(certificate);
+
+            // Use the signing key
+            var credentials = new SigningCredentials(signingKey, SecurityAlgorithms.RsaSha256);
+
+            static X509Certificate2 GenerateSelfSignedCertificate(string password)
+            {
+                using var rsa = RSA.Create(2048);
+
+                var certificateRequest = new CertificateRequest(
+                    "CN=SelfSignedCert",
+                    rsa,
+                    HashAlgorithmName.SHA256,
+                    RSASignaturePadding.Pkcs1);
+
+                // Add basic constraints to the certificate
+                certificateRequest.CertificateExtensions.Add(
+                    new X509BasicConstraintsExtension(false, false, 0, false));
+
+                // Add key usage extension
+                certificateRequest.CertificateExtensions.Add(
+                    new X509KeyUsageExtension(
+                        X509KeyUsageFlags.DigitalSignature | X509KeyUsageFlags.KeyEncipherment,
+                        false));
+
+                // Add subject key identifier
+                certificateRequest.CertificateExtensions.Add(
+                    new X509SubjectKeyIdentifierExtension(certificateRequest.PublicKey, false));
+
+                // Create the self-signed certificate
+                var certificate = certificateRequest.CreateSelfSigned(
+                    DateTimeOffset.UtcNow.AddDays(-1),
+                    DateTimeOffset.UtcNow.AddYears(1));
+
+                // Export the certificate with the private key, protected by the password
+                var exportedCertificate = certificate.Export(X509ContentType.Pfx, password);
+
+                // Import the certificate back with the password
+                return new X509Certificate2(exportedCertificate, password, X509KeyStorageFlags.Exportable);
+            }
+
+
+            builder.Services.AddAuthorizationBuilder()
+                .AddPolicy("AuthenticatedOnly", policy =>
+                {
+                    policy.RequireAuthenticatedUser();
+                })
+                .SetDefaultPolicy(new AuthorizationPolicyBuilder(JwtBearerDefaults.AuthenticationScheme)
+                .RequireAuthenticatedUser()
+                .Build());
+
+            builder.Services.AddAuthentication(options =>
+            {
+                options.DefaultScheme = JwtBearerDefaults.AuthenticationScheme;
+                options.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
+                options.DefaultSignInScheme = JwtBearerDefaults.AuthenticationScheme;
+                options.DefaultChallengeScheme = "JWT_OR_COOKIE";
+            })
+                .AddJwtBearer(JwtBearerDefaults.AuthenticationScheme, options =>
+                {
+                    options.Authority = "https://localhost:5000";
+                    options.Audience = "IaA";
+                    options.RequireHttpsMetadata = false;
+
+                    options.TokenValidationParameters = new TokenValidationParameters
+                    {
+                        IssuerSigningKeyResolver = (_, _, kid, _) =>
+                        {
+                            return [signingKey];
+                        },
+                        ValidateAudience = true,
+                        ValidateLifetime = true,
+                        ValidateIssuer = true,
+                        ValidateIssuerSigningKey = true
+                    };
+
+                    options.Events = new JwtBearerEvents
+                    {
+                        OnChallenge = context =>
+                        {
+                            context.Response.Redirect("/login?returnUrl=" + Uri.EscapeDataString(context.Request.Path + context.Request.QueryString));
+                            context.HandleResponse();
+                            return Task.CompletedTask;
+                        }
+                    };
+                })
+                .AddCookie(CookieAuthenticationDefaults.AuthenticationScheme, options =>
+                {
+                    options.LoginPath = "/login";
+                    options.Cookie.Name = "IaA_session";
+                    options.Cookie.SameSite = SameSiteMode.None;
+                    options.Cookie.SecurePolicy = CookieSecurePolicy.Always;
+                    options.Cookie.Domain = builder.Environment.IsDevelopment() ? null : builder.Configuration["Authentication:CookieDomain"];
+                });
+
+
+            if (instance.Name == 0)
+            {
+                //builder.Services.AddDbContext<ApplicationDbContext>(options =>
+                //{
+                //    // Configure the context to use the in-memory store.
+                //    options.UseInMemoryDatabase(databaseName: "OpenIddict-InMemory");
+
+                //    // Register the entity sets needed by OpenIddict.
+                //    options.UseOpenIddict();
+                //});
+
+                //builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
+                //.AddCookie(CookieAuthenticationDefaults.AuthenticationScheme, options =>
+                //{
+                //    options.LoginPath = "/login";
+                //});
+
+                builder.Services.AddOpenIddict()
+
+                    .AddServer(options =>
+                    {
+                        //options.AddEventHandler(
+                        //    OpenIddictServerHandlerDescriptor.CreateBuilder<OpenIddictServerEvents.ProcessSignInContext>()
+                        //    .UseScopedHandler<ServerHandler>()
+                        //    .SetType(OpenIddictServerHandlerType.Custom)
+                        //    .Build());
+
+                        options.RegisterScopes(Scopes.Email);
+
+                        options.AddEncryptionKey(signingKey);
+                        options.AddSigningCertificate(certificate);
+
+                        options.AllowImplicitFlow();
+
+                        options
+                        .SetAuthorizationEndpointUris("/connect/authorize")
+                        .SetTokenEndpointUris("/connect/token");
+
+                        options.AllowClientCredentialsFlow();
+                        options.AllowAuthorizationCodeFlow();
+                        options.AllowRefreshTokenFlow();
+                        options.DisableAccessTokenEncryption();
+
+                        options.UseAspNetCore()
+                        .EnableTokenEndpointPassthrough()
+                        .EnableAuthorizationEndpointPassthrough()
+                        .DisableTransportSecurityRequirement();
+
+                        options.EnableDegradedMode();
+
+                        options.AddEventHandler<OpenIddictServerEvents.ValidateAuthorizationRequestContext>(builder =>
+                        {
+                            builder.UseInlineHandler(context =>
+                            {
+
+                                //context.SkipRequest();
+                                return default;
+                            });
+                        });
+
+                        options.AddEventHandler<OpenIddictServerEvents.ProcessAuthenticationContext>(builder =>
+                        {
+                            builder.UseInlineHandler(context =>
+                            {
+                                context.HandleRequest();
+
+                                //context.SkipRequest();
+                                return default;
+                            });
+                        });
+                    })
+                    .AddValidation(options =>
+                    {
+                        options.UseLocalServer();
+                        options.UseAspNetCore();
+                    });
+
+                //.AddOpenIdConnect(OpenIdConnectDefaults.AuthenticationScheme, options =>
+                //{
+                //    options.Authority = "https://localhost:5000/"; // your OpenIddict authority
+                //    options.ClientId = "your-client-id";
+                //    options.ClientSecret = "your-client-secret";
+                //    options.SignInScheme = CookieAuthenticationDefaults.AuthenticationScheme;
+                //    options.ResponseType = OpenIdConnectResponseType.Code;
+                //    options.CallbackPath = "/signin-oidc";
+                //    options.SaveTokens = true;
+                //    options.GetClaimsFromUserInfoEndpoint = true;
+                //});
+                //.AddJwtBearer(options =>
+                //{
+                //    //options.TokenValidationParameters = new TokenValidationParameters
+                //    //{
+                //    //    ValidateIssuer = false,
+                //    //    ValidateAudience = false
+                //    //};
+                //    options.Events = new JwtBearerEvents
+                //    {
+                //        OnChallenge = context =>
+                //        {
+                //            var location = $"https://localhost:5000/login";
+                //            context.Response.Redirect(location);
+                //            context.HandleResponse();
+                //            return Task.CompletedTask;
+                //        }
+                //    };
+                //});
+                //builder.Services.AddAuthorization(options =>
+                //{
+                //options.AddPolicy("AuthenticatedOnly", policy =>
+                //{
+                //    policy.AuthenticationSchemes.Add(IdentityConstants.ApplicationScheme);
+                //    policy.AuthenticationSchemes.Add(JwtBearerDefaults.AuthenticationScheme);
+                //    policy.RequireAuthenticatedUser();
+
+                //});
+                //});
+            }
+            else
+            {
+                //builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
+                //   .AddCookie(options =>
+                //   {
+                //       configureCookieOptions(options);
+                //       options.Events.OnRedirectToLogin = (context) =>
+                //       {
+                //           //var location = $"https://{instance0.Domain}/login";
+                //           var location = $"https://localhost:5000/login";
+
+                //           Log.LogOnRedirectToLogin(context.HttpContext.RequestServices.GetRequiredService<ILogger<Program>>(), location);
+
+                //           context.Response.Redirect(location);
+
+                //           return Task.CompletedTask;
+                //       };
+                //   });
+            }
+
+            var key = new SymmetricSecurityKey(Convert.FromBase64String("DRjd/GnduI3Efzen9V9BvbNUfc/VKgXltV7Kbk9sMkY="));
+
+            if (instance.Name == 0)
+            {
+                //builder.Services.AddOpenIddict()
+                //    // Register the OpenIddict core components.
+                //    .AddCore(options =>
+                //    {
+                //        // Configure OpenIddict to use the EF Core stores/models.
+                //        options.UseEntityFrameworkCore()
+                //               .UseDbContext<ApplicationDbContext>();
+                //    })
+                //    // Register the OpenIddict server components.
+                //    .AddServer(options =>
+                //    {
+                //        options
+                //            .AllowClientCredentialsFlow()
+                //            .AllowAuthorizationCodeFlow()
+                //                .RequireProofKeyForCodeExchange()
+                //            .AllowRefreshTokenFlow();
+
+                //        options
+                //            .SetTokenEndpointUris("/connect/token")
+                //            .SetAuthorizationEndpointUris("/connect/authorize");
+
+                //        // Encryption and signing of tokens
+                //        options
+                //            .AddEphemeralEncryptionKey()
+                //            .AddEphemeralSigningKey()
+                //            .DisableAccessTokenEncryption();
+
+                //        // Register scopes (permissions)
+                //        options.RegisterScopes("api");
+
+                //        // Register the ASP.NET Core host and configure the ASP.NET Core-specific options.
+                //        options
+                //            .UseAspNetCore()
+                //            .EnableTokenEndpointPassthrough()
+                //            .EnableAuthorizationEndpointPassthrough();
+                //    })
+                //    // Register the OpenIddict validation components (needed for UserInfo endpoint, etc.)
+                //    .AddValidation(options =>
+                //    {
+                //        // Import the configuration from the local OpenIddict server instance.
+                //        options.UseLocalServer();
+
+                //        // Register the ASP.NET Core host.
+                //        options.UseAspNetCore();
+
+                //        // Enable token validation for JWT. OpenIddict uses this automatically
+                //        // when UseLocalServer() and signing keys are configured on the server.
+                //    });
+            }
+            else
+            {
+                //builder.Services
+                //    .AddOpenIddict()
+                //    .AddCore(options =>
+                //    {
+                //    })
+                //    .AddValidation(options =>
+                //    {
+                //        // So our APIs can easily validate tokens
+                //        options.UseLocalServer();
+                //        options.UseAspNetCore();
+                //    });
+            }
+
+            builder.Services.AddSingleton<ITransformProvider, DynamicDestinationTransformProvider>();
+
+            //builder.Services.AddHostedService<Worker>();
+
+            //builder.Services.AddIdentity<IdentityUser, IdentityRole>()
+            //    .AddEntityFrameworkStores<ApplicationDbContext>()
+            //    .AddDefaultTokenProviders();
+
+            var app = builder.Build();
+
+            if (instance.Name == 0)
+            {
+                app.MapPost("~/connect/authorize", (OpenIddictRequest context) =>
+                {
+                    // Simple hardcoded check
+                    //if (context.Request.Form["username"] != "user" || context.Request.Form["password"] != "pass")
+                    //    return Results.Forbid();
+
+                    var claims = new List<Claim>
+                    {
+                        new(Claims.Subject, "user-id"),
+                        new(Claims.Name, "Simple User")
+                    };
+
+                    var identity = new ClaimsIdentity(claims,
+                        authenticationType: OpenIddictServerAspNetCoreDefaults.AuthenticationScheme);
+
+                    var principal = new ClaimsPrincipal(identity);
+
+                    // Set scopes
+                    principal.SetScopes(context.GetScopes());
+
+                    return Results.SignIn(principal, null, OpenIddictServerAspNetCoreDefaults.AuthenticationScheme);
+                });
+                app.MapGet("~/connect/token", async (HttpContext context) =>
+                {
+                    // Check if the user is already authenticated via the cookie scheme
+                    var authenticateResult = await context.AuthenticateAsync(CookieAuthenticationDefaults.AuthenticationScheme);
+
+                    // If the user is not authenticated, redirect to the login page
+                    if (!authenticateResult.Succeeded || !authenticateResult.Principal.Identity.IsAuthenticated)
+                    {
+                        // Capture the original authorization request URL to return to after login
+                        var returnUrl = context.Request.GetEncodedUrl();
+
+                        // Redirect to your login page, passing the returnUrl
+                        // Use Uri.EscapeDataString to ensure the URL is properly encoded
+                        context.Response.Redirect($"/login?returnUrl={Uri.EscapeDataString(returnUrl)}");
+                        return; // Stop further processing
+                    }
+                });
+                app.MapPost("~/connect/token", async (HttpContext context) =>
+                {
+                    //retrieve OIDC request from original request
+                    var request = context.GetOpenIddictServerRequest() ??
+                    throw new InvalidOperationException("The OpenID Connect request cannot be retrieved.");
+
+                    if (request.IsClientCredentialsGrantType())
+                    {
+                        var clientId = request.ClientId;
+                        var identity = new ClaimsIdentity(authenticationType: TokenValidationParameters.DefaultAuthenticationType);
+
+                        identity.SetClaim(Claims.Subject, clientId);
+                        identity.SetScopes(request.GetScopes());
+                        var principal = new ClaimsPrincipal(identity);
+                        // Returning a SignInResult will ask OpenIddict to issue the appropriate access/identity tokens.
+                        return Results.SignIn(principal, null, OpenIddictServerAspNetCoreDefaults.AuthenticationScheme);
+                    }
+
+                    throw new NotImplementedException("The specified grant type is not implemented.");
+                });
+
+                app.MapGet("/login", async (HttpContext context, [FromQuery] string? returnUrl) =>
+                {
+                    returnUrl = "https://localhost:5000/callback";
+
+                    await context.Response.WriteAsync(
+    $"""
+<html>
+    <head>
+        <meta name="color-scheme" content="only dark" />
+    </head>
+    <body>
+    <form method="post" action="/connect/authorize">
+        <input type="hidden" name="client_id" value="my-client" />
+        <input type="hidden" name="redirect_uri" value="{returnUrl}" />
+        <input type="hidden" name="response_type" value="token" />
+        <input type="hidden" name="scope" value="openid" />
+        <input type="hidden" name="nonce" value="{Guid.NewGuid()}" />
+
+        <label>Username: <input name="username" /></label><br />
+        <label>Password: <input name="password" type="password" /></label><br />
+        <button type="submit">Login</button>
+    </form>
+    </body>
+</html>
+""");
+                });
+
+                app.MapPost("/login", async (
+                    HttpContext context,
+                    [FromServices] IConfiguration config,
+                    [FromForm] string username,
+                    [FromForm] string password,
+                    [FromQuery] string? returnUrl) =>
+                {
+                    var creds = config.GetCredentials();
+                    // simple lookup in our env‑var list
+                    if (!creds.Any(u => u.Username == username && u.Password == password))
+                    {
+                        context.Response.StatusCode = 401;
+                        await context.Response.WriteAsync("Invalid credentials");
+
+                        return "";
+                    }
+
+                    var handler = new JwtSecurityTokenHandler();
+
+                    var privateKey = Encoding.UTF8.GetBytes("dfsdfffldefdsfsdvcxxdfsdfffldefdsfsdvcxx");
+                    var credentials = new SigningCredentials(new SymmetricSecurityKey(privateKey), SecurityAlgorithms.HmacSha256);
+
+                    var tokenDescriptor = new SecurityTokenDescriptor
+                    {
+                        SigningCredentials = credentials,
+                        Expires = DateTime.UtcNow.AddHours(1),
+                        Subject = new ClaimsIdentity()
+                    };
+
+                    var token = handler.CreateToken(tokenDescriptor);
+                    return handler.WriteToken(token);
+
+                    //context.Response.Redirect(returnUrl);
+                }).DisableAntiforgery();
+            }
+
+            app.MapGet("/apps", async (HttpContext http, IConfiguration config) =>
+            {
+                var apps = config.GetApps();
+
+                await http.Response.WriteAsync(
+            $"""
+            <html>
+            <head>
+            <meta name="color-scheme" content="only dark" />
+            </head>
+            <body>
+            <h1>Select an App</h1>
+            <form method="post" action="/apps">
+            {string.Join("\n", apps.Select(app => $"""
+            <button type="submit" name="appName" value="{app.Name}">{app.Name}</button>
+            """))}
+            </form>
+            </body>
+            </html>
+            """);
+            }).RequireAuthorization();
+
+            app.MapPost("/apps", (HttpContext context, [FromServices] IConfiguration config, [FromForm] string appName) =>
+            {
+                context.Response.Cookies.Append("app", appName, new CookieOptions
+                {
+                    Domain = builder.Environment.IsDevelopment() ? null : builder.Configuration["Authentication:CookieDomain"],
+                    SameSite = SameSiteMode.Lax,
+                    Secure = true
+                });
+
+                context.Response.Redirect("/apps");
+            }).RequireAuthorization().DisableAntiforgery();
+
+            app.MapGet("/bablablablablablablablab", (HttpContext context) =>
+            {
+            }).DisableAntiforgery();
+
+            //app.MapReverseProxy(proxyPipeline =>
+            //{
+            //});
+
+            app.UseRouting();
+            app.UseAuthentication();
+            app.UseAuthorization();
+
+            app.Run();
+
+        }
+    }
+
+    public record Credential(string Username, string Password);
+    public record App(string Name, int Instance, int Port);
+    public record Instance(int Name, string Domain);
+
+    [JsonSerializable(typeof(Credential))]
+    [JsonSerializable(typeof(App))]
+    [JsonSerializable(typeof(Instance))]
+    internal partial class AppJsonSerializerContext : JsonSerializerContext
+    {
+
+    }
+
+
+    public sealed class ServerHandler : IOpenIddictServerHandler<OpenIddictServerEvents.ProcessSignInContext>
+    {
+        public async ValueTask HandleAsync(ProcessSignInContext context)
+        {
+            await ValueTask.CompletedTask;
+        }
+    }
+
+
+
+    public sealed class CustomAuthorizationRequestValidationHandler : IOpenIddictServerHandler<ValidateAuthorizationRequestContext>
+    {
+        public ValueTask HandleAsync(ValidateAuthorizationRequestContext context)
+        {
+            // ** Implement your custom authorization request validation logic here **
+
+            // Examples of accessing request parameters:
+            var clientId = context.ClientId;
+            var redirectUri = context.RedirectUri;
+
+            context.Reject(error: OpenIddictConstants.Errors.UnauthorizedClient, description: "The client is not authorized to request 'my_custom_scope'.");
+
+            // If validation passes, do nothing or perform other actions
+            return ValueTask.CompletedTask;
+        }
+    }
+
+    public sealed class CustomTokenRequestValidationHandler : IOpenIddictServerHandler<ValidateTokenRequestContext>
+    {
+        public ValueTask HandleAsync(ValidateTokenRequestContext context)
+        {
+
+
+            // If validation passes, do nothing or perform other actions
+            return ValueTask.CompletedTask;
+        }
+    }
+    public class DynamicDestinationTransformProvider : ITransformProvider
+    {
+        public void Apply(TransformBuilderContext context)
+        {
+            context.RequestTransforms.Add(new DynamicDestinationTransform(context.Services));
+        }
+
+        public void ValidateCluster(TransformClusterValidationContext context)
+        {
+
+        }
+
+        public void ValidateRoute(TransformRouteValidationContext context)
+        {
+
+        }
+
+        private sealed class DynamicDestinationTransform : RequestTransform
+        {
+            private readonly FrozenSet<App> _apps;
+            private readonly Instance _instance;
+            private readonly FrozenSet<Instance> _instances;
+            private readonly ILogger<DynamicDestinationTransform> _logger;
+
+            public DynamicDestinationTransform(IServiceProvider services)
+            {
+                var config = services.GetRequiredService<IConfiguration>();
+                _apps = config.GetApps();
+                _instance = config.GetInstance();
+                _instances = config.GetInstances();
+                _logger = services.GetRequiredService<ILogger<DynamicDestinationTransform>>();
+            }
+
+            public override async ValueTask ApplyAsync(RequestTransformContext context)
+            {
+                if (!context.HttpContext.Request.Cookies.TryGetValue("app", out var selectedApp))
+                {
+                    return;
+                }
+
+                Log.LogSelectedApp(_logger, selectedApp);
+
+                if (_apps.FirstOrDefault(x => string.Equals(x.Name, selectedApp, StringComparison.Ordinal)) is not { } app)
+                {
+                    return;
+                }
+
+                Log.LogFoundSelectedApp(_logger, app);
+
+                Log.LogInstance(_logger, _instance.Name, app.Instance);
+
+                Uri newUri;
+                if (_instance.Name != app.Instance && _instances.TryGetInstance(app.Instance, out var instance))
+                {
+                    newUri = new UriBuilder("https", instance.Domain, 443, context.HttpContext.Request.Path).Uri;
+                }
+                else
+                {
+                    newUri = new UriBuilder("http", app.Name, app.Port, context.HttpContext.Request.Path).Uri;
+                }
+
+                Log.LogProxyUri(_logger, newUri);
+
+                Rewrite(context, newUri);
+
+                await ValueTask.CompletedTask;
+            }
+        }
+
+        private static void Rewrite(RequestTransformContext context, Uri uri)
+        {
+            context.ProxyRequest.RequestUri = uri;
+            context.ProxyRequest.Headers.Host = uri.Authority;
+        }
+    }
+}
