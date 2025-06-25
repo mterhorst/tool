@@ -53,14 +53,6 @@ namespace ToolManager
             })
             .AddOpenIdConnect(OpenIdConnectDefaults.AuthenticationScheme, options =>
             {
-                options.CorrelationCookie = new CookieBuilder
-                {
-                    Name = "o_",
-                    HttpOnly = true,
-                    SameSite = SameSiteMode.None,
-                    SecurePolicy = CookieSecurePolicy.Always,
-                    IsEssential = true,
-                };
                 options.Authority = $"https://login.microsoftonline.com/{builder.Configuration["EntraID:TenantId"]}/v2.0";
                 options.ClientId = builder.Configuration["EntraID:ClientId"];
                 options.ClientSecret = builder.Configuration["EntraID:ClientSecret"];
@@ -285,8 +277,7 @@ namespace ToolManager
                     .Where(cookie =>
                     {
                         var cookieName = cookie.Split('=', 2)[0].Trim();
-                        return !cookieName.StartsWith("s_", StringComparison.OrdinalIgnoreCase)
-                            && !cookieName.StartsWith("o_", StringComparison.OrdinalIgnoreCase);
+                        return !cookieName.StartsWith("s_", StringComparison.OrdinalIgnoreCase);
                     });
 
                 var newCookieHeader = string.Join("; ", filteredCookies);
