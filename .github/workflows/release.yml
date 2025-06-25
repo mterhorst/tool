@@ -121,12 +121,17 @@ jobs:
           # --- Generate the Dockerfile ---
           # Use Fedora as the base image
           cat > docker-build/Dockerfile <<EOF
-          FROM fedora:latest
+          FROM mcr.microsoft.com/dotnet/runtime-deps:9.0-alpine-chiseled-aot
+
+
+          # FROM fedora:latest
           # Install common runtime dependencies for .NET Native AOT
           # libicu provides globalization support, openssl-libs provides crypto
-          RUN dnf update -y && \
-              dnf install -y libicu openssl-libs && \
-              dnf clean all
+          # RUN dnf update -y && \
+          #     dnf install -y libicu openssl-libs && \
+          #    dnf clean all
+
+
           WORKDIR /app
           COPY . .
           # Ensure the binary is executable
