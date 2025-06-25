@@ -28,6 +28,11 @@ namespace ToolManager
                 builder.WebHost.UseKestrelHttpsConfiguration();
             }
 
+            builder.WebHost.ConfigureKestrel(serverOptions =>
+            {
+                serverOptions.Limits.MaxRequestBodySize = long.MaxValue;
+            });
+
             builder.Services.ConfigureHttpJsonOptions(options =>
             {
                 options.SerializerOptions.TypeInfoResolverChain.Insert(0, AppJsonSerializerContext.Default);
