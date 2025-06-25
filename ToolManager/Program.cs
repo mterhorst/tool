@@ -48,11 +48,19 @@ namespace ToolManager
             })
             .AddCookie(options =>
             {
-                options.Cookie.Name = "s";
+                options.Cookie.Name = "s_";
                 options.Cookie.HttpOnly = true;
             })
             .AddOpenIdConnect(OpenIdConnectDefaults.AuthenticationScheme, options =>
             {
+                options.CorrelationCookie = new CookieBuilder
+                {
+                    Name = "o_",
+                    HttpOnly = true,
+                    SameSite = SameSiteMode.None,
+                    SecurePolicy = CookieSecurePolicy.Always,
+                    IsEssential = true,
+                };
                 options.Authority = $"https://login.microsoftonline.com/{builder.Configuration["EntraID:TenantId"]}/v2.0";
                 options.ClientId = builder.Configuration["EntraID:ClientId"];
                 options.ClientSecret = builder.Configuration["EntraID:ClientSecret"];
@@ -261,34 +269,34 @@ namespace ToolManager
 
                 Log.LogProxyUri(_logger, newUri);
 
-                // Remove specific cookies from the proxied request
-                var excludedCookies = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "app", "s", "sC1", "sC2", "sC3" };
-                if (context.ProxyRequest.Headers.TryGetValues("Cookie", out var cookieHeaders))
-                {
-                    var filteredCookies = cookieHeaders
-                        .SelectMany(header => header.Split(';', StringSplitOptions.RemoveEmptyEntries))
-                        .Select(cookie => cookie.Trim())
-                        .Where(cookie =>
-                        {
-                            var cookieName = cookie.Split('=')[0].Trim();
-                            return !excludedCookies.Contains(cookieName);
-                        });
-
-                    var newCookieHeader = string.Join("; ", filteredCookies);
-                    context.ProxyRequest.Headers.Remove("Cookie");
-                    if (!string.IsNullOrEmpty(newCookieHeader))
-                    {
-                        context.ProxyRequest.Headers.Add("Cookie", newCookieHeader);
-                    }
-                }
-
                 Rewrite(context, newUri);
 
                 await ValueTask.CompletedTask;
             }
         }
+
         private static void Rewrite(RequestTransformContext context, Uri uri)
         {
+            if (context.ProxyRequest.Headers.TryGetValues("Cookie", out var cookieHeaders))
+            {
+                var filteredCookies = cookieHeaders
+                    .SelectMany(header => header.Split(';', StringSplitOptions.RemoveEmptyEntries))
+                    .Select(cookie => cookie.Trim())
+                    .Where(cookie =>
+                    {
+                        var cookieName = cookie.Split('=', 2)[0].Trim();
+                        return !cookieName.StartsWith("s_", StringComparison.OrdinalIgnoreCase)
+                            && !cookieName.StartsWith("o_", StringComparison.OrdinalIgnoreCase);
+                    });
+
+                var newCookieHeader = string.Join("; ", filteredCookies);
+                context.ProxyRequest.Headers.Remove("Cookie");
+                if (!string.IsNullOrEmpty(newCookieHeader))
+                {
+                    context.ProxyRequest.Headers.Add("Cookie", newCookieHeader);
+                }
+            }
+
             context.ProxyRequest.RequestUri = uri;
             context.ProxyRequest.Headers.Host = uri.Authority;
         }
