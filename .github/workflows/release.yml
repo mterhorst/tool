@@ -121,7 +121,7 @@ jobs:
           # --- Generate the Dockerfile ---
           # Use Fedora as the base image
           cat > docker-build/Dockerfile <<EOF
-          FROM mcr.microsoft.com/dotnet/runtime-deps:9.0-alpine-chiseled-aot
+          FROM mcr.microsoft.com/dotnet/runtime-deps:9.0.6-azurelinux3.0-distroless
 
 
           # FROM fedora:latest
