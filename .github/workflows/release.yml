@@ -122,11 +122,8 @@ jobs:
           cat > docker-build/Dockerfile <<EOF
           FROM mcr.microsoft.com/dotnet/runtime-deps:9.0.6-azurelinux3.0-distroless-extra
           WORKDIR /app
-          COPY . .
-          # Ensure the binary is executable
-          RUN chmod +x ./ToolManager
-          # Set the entrypoint for the container
-          ENTRYPOINT ["./ToolManager"]
+          COPY ToolManager .
+          ENTRYPOINT ["/app/ToolManager"]
           EOF
           # --- End of Dockerfile generation ---
 
