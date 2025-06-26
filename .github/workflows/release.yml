@@ -119,19 +119,11 @@ jobs:
           unzip ToolManager-linux-x64.zip -d docker-build/
 
           # --- Generate the Dockerfile ---
-          # Use Fedora as the base image
+          # Generate minimal Dockerfile using 'scratch' base image
           cat > docker-build/Dockerfile <<EOF
-          FROM fedora:latest
-          # Install common runtime dependencies for .NET Native AOT
-          # libicu provides globalization support, openssl-libs provides crypto
-          RUN dnf update -y && \
-              dnf install -y libicu openssl-libs && \
-              dnf clean all
+          FROM scratch
           WORKDIR /app
-          COPY . .
-          # Ensure the binary is executable
-          RUN chmod +x ./ToolManager
-          # Set the entrypoint for the container
+          COPY ToolManager .
           ENTRYPOINT ["./ToolManager"]
           EOF
           # --- End of Dockerfile generation ---
