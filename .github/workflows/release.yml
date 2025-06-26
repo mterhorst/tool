@@ -119,11 +119,13 @@ jobs:
           unzip ToolManager-linux-x64.zip -d docker-build/
 
           # --- Generate the Dockerfile ---
-          # Generate minimal Dockerfile using 'scratch' base image
           cat > docker-build/Dockerfile <<EOF
-          FROM scratch
+          FROM mcr.microsoft.com/dotnet/runtime-deps:9.0.6-azurelinux3.0-distroless-extra
           WORKDIR /app
-          COPY ToolManager .
+          COPY . .
+          # Ensure the binary is executable
+          RUN chmod +x ./ToolManager
+          # Set the entrypoint for the container
           ENTRYPOINT ["./ToolManager"]
           EOF
           # --- End of Dockerfile generation ---
