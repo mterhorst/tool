@@ -123,7 +123,6 @@ jobs:
           FROM mcr.microsoft.com/dotnet/runtime-deps:9.0.6-azurelinux3.0-distroless-extra
           WORKDIR /app
           COPY ToolManager .
-          EXPOSE 443
           ENTRYPOINT ["/app/ToolManager"]
           EOF
           # --- End of Dockerfile generation ---
