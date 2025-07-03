@@ -3,7 +3,6 @@ using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authentication.OpenIdConnect;
 using Microsoft.AspNetCore.Mvc;
 using System.Collections.Concurrent;
-using System.Collections.Frozen;
 using System.Security.Cryptography;
 using System.Text.Json.Serialization;
 using Yarp.ReverseProxy.Transforms;
@@ -147,39 +146,6 @@ namespace ToolManager
                 });
             });
 
-            app.MapGet("/apps", async (HttpContext http, IConfiguration config) =>
-            {
-                var apps = config.GetApps();
-
-                await http.Response.WriteAsync(
-                    $"""
-                    <html>              
-                        <head>
-                            <meta name="color-scheme" content="only dark" />
-                        </head>
-                        <body>
-                            <h1>Select an App</h1>
-                            <form method="post" action="/apps">
-                                {string.Join("\n", apps.Select(app => $"""
-                                <button type="submit" name="appName" value="{app.Name}">{app.Name}</button>
-                                """))}
-                            </form>
-                        </body>
-                    </html>
-                    """);
-            }).RequireAuthorization();
-
-            app.MapPost("/apps", (HttpContext context, [FromServices] IConfiguration config, [FromForm] string appName) =>
-            {
-                context.Response.Cookies.Append("app", appName, new CookieOptions
-                {
-                    SameSite = SameSiteMode.Lax,
-                    HttpOnly = true
-                });
-
-                context.Response.Redirect("/apps");
-            }).RequireAuthorization().DisableAntiforgery();
-
             app.MapReverseProxy(proxyPipeline =>
             {
             });
@@ -193,15 +159,10 @@ namespace ToolManager
         }
     }
 
-    public record App(string Name, int Instance, int Port);
-    public record Instance(int Name, string Domain);
+    public record App(string Name, int Port);
 
     [JsonSerializable(typeof(App))]
-    [JsonSerializable(typeof(Instance))]
-    internal partial class AppJsonSerializerContext : JsonSerializerContext
-    {
-
-    }
+    internal partial class AppJsonSerializerContext : JsonSerializerContext { }
 
     public class DynamicDestinationTransformProvider : ITransformProvider
     {
@@ -222,47 +183,21 @@ namespace ToolManager
 
         private sealed class DynamicDestinationTransform : RequestTransform
         {
-            private readonly FrozenSet<App> _apps;
-            private readonly Instance _instance;
-            private readonly FrozenSet<Instance> _instances;
+            private readonly App _app;
             private readonly ILogger<DynamicDestinationTransform> _logger;
 
             public DynamicDestinationTransform(IServiceProvider services)
             {
                 var config = services.GetRequiredService<IConfiguration>();
-                _apps = config.GetApps();
-                _instance = config.GetInstance();
-                _instances = config.GetInstances();
+                _app = config.GetApp();
                 _logger = services.GetRequiredService<ILogger<DynamicDestinationTransform>>();
             }
 
             public override async ValueTask ApplyAsync(RequestTransformContext context)
             {
-                if (!context.HttpContext.Request.Cookies.TryGetValue("app", out var selectedApp))
-                {
-                    return;
-                }
+                Log.LogFoundSelectedApp(_logger, _app);
 
-                Log.LogSelectedApp(_logger, selectedApp);
-
-                if (_apps.FirstOrDefault(x => string.Equals(x.Name, selectedApp, StringComparison.Ordinal)) is not { } app)
-                {
-                    return;
-                }
-
-                Log.LogFoundSelectedApp(_logger, app);
-
-                Log.LogInstance(_logger, _instance.Name, app.Instance);
-
-                Uri newUri;
-                if (_instance.Name != app.Instance && _instances.TryGetInstance(app.Instance, out var instance))
-                {
-                    newUri = new UriBuilder("https", instance.Domain, 443, context.HttpContext.Request.Path).Uri;
-                }
-                else
-                {
-                    newUri = new UriBuilder("http", app.Name, app.Port, context.HttpContext.Request.Path).Uri;
-                }
+                var newUri = new UriBuilder("http", _app.Name, _app.Port, context.HttpContext.Request.Path).Uri;
 
                 Log.LogProxyUri(_logger, newUri);
 
