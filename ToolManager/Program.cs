@@ -45,6 +45,8 @@ namespace ToolManager
                 policy.RequireAuthenticatedUser();
             });
 
+            var entraId = builder.Configuration.GetEntraId();
+
             builder.Services.AddAuthentication(options =>
             {
                 options.DefaultScheme = CookieAuthenticationDefaults.AuthenticationScheme;
@@ -57,9 +59,9 @@ namespace ToolManager
             })
             .AddOpenIdConnect(OpenIdConnectDefaults.AuthenticationScheme, options =>
             {
-                options.Authority = $"https://login.microsoftonline.com/{builder.Configuration["EntraID:TenantId"]}/v2.0";
-                options.ClientId = builder.Configuration["EntraID:ClientId"];
-                options.ClientSecret = builder.Configuration["EntraID:ClientSecret"];
+                options.Authority = $"https://login.microsoftonline.com/{entraId.Tenantid}/v2.0";
+                options.ClientId = entraId.Clientid;
+                options.ClientSecret = entraId.Clientsecret;
                 options.ResponseType = "code";
                 options.SaveTokens = true;
                 options.Scope.Add("openid");
@@ -84,6 +86,8 @@ namespace ToolManager
                         }
                     };
                 }
+
+                entraId = entraId with { Clientsecret = string.Empty };
             });
 
             builder.Services.AddSingleton<ITransformProvider, DynamicDestinationTransformProvider>();
@@ -93,16 +97,16 @@ namespace ToolManager
             // Admin Consent flow initiator
             app.MapGet("/admin-consent", () =>
             {
-                var clientId = builder.Configuration["EntraID:ClientId"];
+                var clientId = entraId.Clientid;
                 var scopes = Uri.EscapeDataString("openid profile https://graph.microsoft.com/.default");
 
                 var state = Convert.ToHexString(RandomNumberGenerator.GetBytes(16));
                 _states[state] = DateTime.UtcNow;
 
-                var url = $"https://login.microsoftonline.com/{builder.Configuration["EntraID:TenantId"]}/v2.0/adminconsent" +
+                var url = $"https://login.microsoftonline.com/{entraId.Tenantid}/v2.0/adminconsent" +
                           $"?client_id={clientId}" +
                           $"&scope={scopes}" +
-                          $"&redirect_uri={builder.Configuration["EntraID:RedirectUri"]}" +
+                          $"&redirect_uri={entraId.Redirecturi}" +
                           $"&state={state}";
 
                 return Results.Redirect(url);
@@ -137,7 +141,7 @@ namespace ToolManager
 
                 // Sign out of the OpenID Connect session and redirect to Entra ID logout
                 var callbackUrl = Uri.EscapeDataString("https://localhost:5000/"); // Change to your post-logout redirect URI
-                var tenantId = builder.Configuration["EntraID:TenantId"];
+                var tenantId = entraId.Tenantid;
                 var logoutUrl = $"https://login.microsoftonline.com/{tenantId}/oauth2/v2.0/logout?post_logout_redirect_uri={callbackUrl}";
 
                 await context.SignOutAsync(OpenIdConnectDefaults.AuthenticationScheme, new AuthenticationProperties
@@ -159,8 +163,10 @@ namespace ToolManager
         }
     }
 
+    public record EntraId(string Clientid, string Tenantid, string Clientsecret, string Redirecturi);
     public record App(string Name, int Port);
 
+    [JsonSerializable(typeof(EntraId))]
     [JsonSerializable(typeof(App))]
     internal partial class AppJsonSerializerContext : JsonSerializerContext { }
 
