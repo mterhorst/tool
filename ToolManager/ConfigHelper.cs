@@ -4,7 +4,7 @@
     {
         public static App GetApp(this IConfiguration configuration)
         {
-            return configuration.GetValue<App>("App") ?? throw new KeyNotFoundException("App not found.");
+            return configuration.GetSection("App").Get<App>() ?? throw new KeyNotFoundException("App not found.");
         }
     }
 }
